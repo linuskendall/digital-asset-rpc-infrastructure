@@ -1,8 +1,11 @@
-use super::{BgTask, FromTaskData, IngesterError, IntoTaskData, TaskData, metric};
+use crate::{
+    tasks::{FromTaskData, IntoTaskData},
+    BgTask, IngesterError, TaskData,
+    metric
+};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use digital_asset_types::dao::asset_data;
-use log::debug;
 use reqwest::{Client, ClientBuilder};
 use sea_orm::*;
 use serde::{Deserialize, Serialize};
@@ -63,17 +66,15 @@ impl DownloadMetadataTask {
 
         if let Err(e) = response {
             metric! {
-                let status = match e.status().clone() {
-                    Some(s) => String::from(s.as_str()),
-                    _ => String::from("")
-                };
-                let redirect = match e.is_redirect() {
-                    true => "yes",
-                    false => "no"
-                };
+                statsd_count!("ingester.bgtask.fetch_error", 1, 
+                    "type" => TASK_NAME);
+            }
+            Err(IngesterError::FetchError(e.to_string()))
+        } else if resp.status() != reqwest::StatusCode::OK {
+            metric! {
                 statsd_count!("ingester.bgtask.http_error", 1, 
-                    "redirect" => redirect,
-                    "status" => status.as_str());
+                    "status" => status.unwrap_or("".to_string()).as_str(),
+                    "type" => TASK_NAME);
             }
             Err(IngesterError::HttpError(e.to_string()))
         } else {
@@ -113,7 +114,7 @@ impl BgTask for DownloadMetadataTask {
             metadata: Set(body),
             ..Default::default()
         };
-        debug!(
+        println!(
             "download metadata for {:?}",
             bs58::encode(download_metadata.asset_data_id.clone()).into_string()
         );
